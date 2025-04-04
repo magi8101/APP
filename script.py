@@ -2,9 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import altair as alt
-import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 import random
 import uuid
@@ -16,7 +14,6 @@ from io import BytesIO
 import re
 from PIL import Image
 from wordcloud import WordCloud
-import matplotlib.pyplot as plt
 from collections import Counter
 import networkx as nx
 from supabase import create_client, Client
@@ -386,7 +383,7 @@ def load_svg_icons():
         "globe": """<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>""",
         "tag": """<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>""",
         "topic": """<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>""",
-        "intent": """<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10  stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>""",
+        "intent": """<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>""",
         "region": """<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s-8-4.5-8-11.8A8 8 0 0 1 12 2a8 8 0 0 1 8 8.2c0 7.3-8 11.8-8 11.8z"/><circle cx="12" cy="10" r="3"/></svg>"""
     }
     return icons
@@ -609,110 +606,25 @@ def create_conversation_network(df):
     # Calculate positions using a spring layout
     pos = nx.spring_layout(G, seed=42)
     
-    # Create edge trace
-    edge_x = []
-    edge_y = []
-    edge_z = []
-    edge_text = []
-    
+    # Create edge and node data for visualization
+    edge_data = []
     for edge in G.edges(data=True):
-        x0, y0 = pos[edge[0]]
-        x1, y1 = pos[edge[1]]
-        edge_x.extend([x0, x1, None])
-        edge_y.extend([y0, y1, None])
-        edge_z.extend([0, 0, None])
-        edge_text.append(f"{edge[0]} → {edge[1]}: {edge[2].get('weight', 1)}")
+        source_idx = list(G.nodes()).index(edge[0])
+        target_idx = list(G.nodes()).index(edge[1])
+        edge_data.append({
+            'source': source_idx,
+            'target': target_idx,
+            'weight': edge[2].get('weight', 1)
+        })
     
-    edge_trace = go.Scatter3d(
-        x=edge_x, y=edge_y, z=edge_z,
-        line=dict(width=1, color='rgba(150,150,150,0.5)'),
-        hoverinfo='none',
-        mode='lines')
+    node_data = []
+    for node in G.nodes(data=True):
+        node_data.append({
+            'name': node[0],
+            'type': node[1]['type']
+        })
     
-    # Create node trace
-    node_x = []
-    node_y = []
-    node_z = []
-    node_text = []
-    node_color = []
-    node_size = []
-    
-    for node in G.nodes():
-        x, y = pos[node]
-        node_x.append(x)
-        node_y.append(y)
-        node_z.append(0)  # All nodes on z=0 plane
-        node_text.append(str(node))
-        
-        if G.nodes[node]['type'] == 'user':
-            node_color.append('rgba(31, 119, 180, 0.8)')  # Blue for users
-            node_size.append(15)
-        else:
-            node_color.append('rgba(255, 127, 14, 0.8)')  # Orange for topics
-            node_size.append(10)
-    
-    node_trace = go.Scatter3d(
-        x=node_x, y=node_y, z=node_z,
-        mode='markers',
-        marker=dict(
-            size=node_size,
-            color=node_color,
-            line=dict(width=1, color='rgb(50,50,50)')
-        ),
-        text=node_text,
-        hoverinfo='text')
-    
-    return edge_trace, node_trace
-
-@st.cache_data
-def create_3d_sentiment_time_plot(df):
-    """Create a 3D plot of sentiment over time with message length"""
-    if df.empty:
-        return None
-    
-    # Convert timestamp to numeric for better 3D plotting
-    df = df.copy()
-    df['time_numeric'] = (df['timestamp'] - df['timestamp'].min()).dt.total_seconds() / 3600  # hours
-    
-    # Create 3D scatter plot
-    fig = go.Figure(data=[
-        go.Scatter3d(
-            x=df['time_numeric'],
-            y=df['sentiment_score'],
-            z=df['message_length'],
-            mode='markers',
-            marker=dict(
-                size=8,
-                color=df['sentiment_score'],
-                colorscale='Viridis',
-                opacity=0.8,
-                colorbar=dict(title="Sentiment Score"),
-                line=dict(width=0.5, color='rgb(50,50,50)')
-            ),
-            text=[f"User: {user}<br>Time: {time.strftime('%Y-%m-%d %H:%M')}<br>Sentiment: {sentiment:.2f}<br>Length: {length}" 
-                  for user, time, sentiment, length in zip(df['user_id'], df['timestamp'], df['sentiment_score'], df['message_length'])],
-            hoverinfo='text'
-        )
-    ])
-    
-    # Update layout
-    fig.update_layout(
-        scene=dict(
-            xaxis_title='Time (hours from first message)',
-            yaxis_title='Sentiment Score',
-            zaxis_title='Message Length',
-            xaxis=dict(backgroundcolor="rgba(0, 0, 0, 0.1)"),
-            yaxis=dict(backgroundcolor="rgba(0, 0, 0, 0.1)"),
-            zaxis=dict(backgroundcolor="rgba(0, 0, 0, 0.1)"),
-        ),
-        margin=dict(l=0, r=0, b=0, t=30),
-        scene_camera=dict(
-            eye=dict(x=1.5, y=1.5, z=1.2)
-        ),
-        title="3D Sentiment Analysis Over Time"
-    )
-    
-    return fig
+    return edge_data, node_data
 
 @st.cache_data
 def create_heatmap(df):
@@ -741,27 +653,18 @@ def create_heatmap(df):
     # Reorder days
     heatmap_data = heatmap_data.reindex(day_order)
     
-    # Create heatmap
-    fig = px.imshow(
-        heatmap_data,
-        labels=dict(x="Hour of Day", y="Day of Week", color="Message Count"),
-        x=list(range(24)),
-        y=day_order,
-        color_continuous_scale="Viridis",
-        aspect="auto"
+    # Convert to format for Altair
+    heatmap_df = heatmap_data.reset_index().melt(
+        id_vars='day_of_week', 
+        var_name='hour', 
+        value_name='count'
     )
     
-    fig.update_layout(
-        title="Chat Activity Heatmap by Day and Hour",
-        xaxis=dict(tickmode='linear', tick0=0, dtick=1),
-        coloraxis_colorbar=dict(title="Message Count")
-    )
-    
-    return fig
+    return heatmap_df
 
 @st.cache_data
 def create_user_journey_sankey(df):
-    """Create a Sankey diagram of user journeys through intents and sentiments"""
+    """Create a Sankey diagram data of user journeys through intents and sentiments"""
     if df.empty or 'intent' not in df.columns:
         return None
     
@@ -798,31 +701,16 @@ def create_user_journey_sankey(df):
         targets.append(label_to_idx[row['sentiment_label']])
         values.append(row['count'])
     
-    # Create Sankey diagram
-    fig = go.Figure(data=[go.Sankey(
-        node=dict(
-            pad=15,
-            thickness=20,
-            line=dict(color="black", width=0.5),
-            label=labels,
-            color=["rgba(31, 119, 180, 0.8)"]*len(all_users) + 
-                  ["rgba(255, 127, 14, 0.8)"]*len(all_intents) + 
-                  ["rgba(44, 160, 44, 0.8)"]*len(all_sentiments)
-        ),
-        link=dict(
-            source=sources,
-            target=targets,
-            value=values
-        )
-    )])
+    # Create Sankey data
+    sankey_data = pd.DataFrame({
+        'source': sources,
+        'target': targets,
+        'value': values,
+        'source_label': [labels[s] for s in sources],
+        'target_label': [labels[t] for t in targets]
+    })
     
-    fig.update_layout(
-        title_text="User Journey Flow: Users → Intents → Sentiments",
-        font_size=10,
-        height=500
-    )
-    
-    return fig
+    return sankey_data, labels
 
 # Function to create an Airtable-like grid
 def create_airtable_grid(df, editable_columns=None, key=None):
@@ -1191,6 +1079,7 @@ def fetch_unsplash_images(query, count=1):
                 "https://images.unsplash.com/photo-1543286386-2e659306cd6c?ixlib=rb-1.2.1&auto=format&fit=crop&w=800&q=80"
             ],
             "sentiment": [
+                "https://images.unsplash.com/photo-1499750310107-5fef28a66643?ixlib=rb-1.2.1&auto=format&fit  [
                 "https://images.unsplash.com/photo-1499750310107-5fef28a66643?ixlib=rb-1.2.1&auto=format&fit=crop&w=800&q=80",
                 "https://images.unsplash.com/photo-1484069560501-87d72b0c3669?ixlib=rb-1.2.1&auto=format&fit=crop&w=800&q=80"
             ],
@@ -1217,263 +1106,6 @@ def fetch_unsplash_images(query, count=1):
     except Exception as e:
         st.error(f"Error fetching images: {e}")
         return ["https://images.unsplash.com/photo-1568667256549-094345857637?ixlib=rb-1.2.1&auto=format&fit=crop&w=800&q=80"] * count
-
-# Function to create a 3D visualization of sentiment, response time, and message length
-@st.cache_data
-def create_3d_visualization(df):
-    """Create an advanced 3D visualization of chat data"""
-    if df.empty:
-        return None
-    
-    # Create a copy of the dataframe
-    df_3d = df.copy()
-    
-    # Normalize values for better visualization
-    df_3d['sentiment_norm'] = (df_3d['sentiment_score'] + 1) / 2  # Convert from [-1,1] to [0,1]
-    df_3d['response_time_norm'] = df_3d['response_time'] / df_3d['response_time'].max()
-    df_3d['message_length_norm'] = df_3d['message_length'] / df_3d['message_length'].max()
-    
-    # Create 3D scatter plot
-    fig = go.Figure(data=[
-        go.Scatter3d(
-            x=df_3d['sentiment_norm'],
-            y=df_3d['response_time_norm'],
-            z=df_3d['message_length_norm'],
-            mode='markers',
-            marker=dict(
-                size=10,
-                color=df_3d['sentiment_score'],
-                colorscale=[
-                    [0, 'rgb(244, 67, 54)'],     # Red for negative
-                    [0.5, 'rgb(255, 193, 7)'],   # Yellow for neutral
-                    [1, 'rgb(76, 175, 80)']      # Green for positive
-                ],
-                opacity=0.8,
-                colorbar=dict(title="Sentiment"),
-                symbol='circle'
-            ),
-            text=[
-                f"User: {user}<br>" +
-                f"Sentiment: {sentiment:.2f}<br>" +
-                f"Response Time: {resp_time:.2f}s<br>" +
-                f"Message Length: {msg_len}<br>" +
-                f"Topic: {topic}"
-                for user, sentiment, resp_time, msg_len, topic in 
-                zip(df_3d['user_id'], df_3d['sentiment_score'], df_3d['response_time'], 
-                    df_3d['message_length'], df_3d['topic'])
-            ],
-            hoverinfo='text'
-        )
-    ])
-    
-    # Add axis planes for better orientation
-    x_plane = np.linspace(0, 1, 10)
-    y_plane = np.linspace(0, 1, 10)
-    z_plane = np.linspace(0, 1, 10)
-    
-    x_grid, y_grid = np.meshgrid(x_plane, y_plane)
-    z_grid = np.zeros_like(x_grid)
-    
-    fig.add_trace(go.Surface(
-        x=x_grid, y=y_grid, z=z_grid,
-        colorscale=[[0, 'rgba(200, 200, 200, 0.3)'], [1, 'rgba(200, 200, 200, 0.3)']],
-        showscale=False
-    ))
-    
-    # Add user clusters
-    if 'user_id' in df_3d.columns:
-        for user in df_3d['user_id'].unique():
-            user_data = df_3d[df_3d['user_id'] == user]
-            
-            # Calculate centroid
-            x_centroid = user_data['sentiment_norm'].mean()
-            y_centroid = user_data['response_time_norm'].mean()
-            z_centroid = user_data['message_length_norm'].mean()
-            
-            # Add user centroid
-            fig.add_trace(go.Scatter3d(
-                x=[x_centroid],
-                y=[y_centroid],
-                z=[z_centroid],
-                mode='markers+text',
-                marker=dict(
-                    size=15,
-                    symbol='diamond',
-                    color='rgba(31, 119, 180, 0.8)',
-                    line=dict(color='rgba(0, 0, 0, 0.5)', width=1)
-                ),
-                text=[user],
-                textposition='top center',
-                name=user,
-                showlegend=True
-            ))
-    
-    # Update layout
-    fig.update_layout(
-        scene=dict(
-            xaxis_title='Sentiment (Negative → Positive)',
-            yaxis_title='Response Time',
-            zaxis_title='Message Length',
-            xaxis=dict(
-                backgroundcolor="rgba(200, 200, 200, 0.1)",
-                gridcolor="rgba(255, 255, 255, 0.3)",
-                showbackground=True,
-                zerolinecolor="rgba(255, 255, 255, 0.5)"
-            ),
-            yaxis=dict(
-                backgroundcolor="rgba(200, 200, 200, 0.1)",
-                gridcolor="rgba(255, 255, 255, 0.3)",
-                showbackground=True,
-                zerolinecolor="rgba(255, 255, 255, 0.5)"
-            ),
-            zaxis=dict(
-                backgroundcolor="rgba(200, 200, 200, 0.1)",
-                gridcolor="rgba(255, 255, 255, 0.3)",
-                showbackground=True,
-                zerolinecolor="rgba(255, 255, 255, 0.5)"
-            ),
-            camera=dict(
-                eye=dict(x=1.5, y=1.5, z=1.2),
-                up=dict(x=0, y=0, z=1)
-            )
-        ),
-        margin=dict(l=0, r=0, b=0, t=30),
-        legend=dict(
-            yanchor="top",
-            y=0.99,
-            xanchor="left",
-            x=0.01,
-            bgcolor="rgba(255, 255, 255, 0.3)"
-        ),
-        title="3D Visualization of Chat Metrics",
-        template="plotly_dark"
-    )
-    
-    return fig
-
-# Function to create a 3D network visualization
-@st.cache_data
-def create_3d_network(df):
-    """Create a 3D network visualization of users, topics, and sentiments"""
-    if df.empty:
-        return None
-    
-    # Create a graph
-    G = nx.Graph()
-    
-    # Add nodes
-    users = df['user_id'].unique()
-    topics = df['topic'].unique() if 'topic' in df.columns else []
-    sentiments = df['sentiment_label'].unique() if 'sentiment_label' in df.columns else []
-    
-    # Add user nodes
-    for user in users:
-        G.add_node(user, type='user')
-    
-    # Add topic nodes
-    for topic in topics:
-        G.add_node(topic, type='topic')
-    
-    # Add sentiment nodes
-    for sentiment in sentiments:
-        G.add_node(sentiment, type='sentiment')
-    
-    # Add edges
-    for _, row in df.iterrows():
-        # User to topic edge
-        G.add_edge(row['user_id'], row['topic'], weight=1)
-        
-        # Topic to sentiment edge
-        G.add_edge(row['topic'], row['sentiment_label'], weight=1)
-    
-    # Calculate 3D positions using spring layout
-    pos_3d = nx.spring_layout(G, dim=3, seed=42)
-    
-    # Create node traces
-    node_x = []
-    node_y = []
-    node_z = []
-    node_text = []
-    node_color = []
-    node_size = []
-    node_symbol = []
-    
-    for node, pos in pos_3d.items():
-        node_x.append(pos[0])
-        node_y.append(pos[1])
-        node_z.append(pos[2])
-        node_text.append(str(node))
-        
-        if G.nodes[node]['type'] == 'user':
-            node_color.append('rgba(31, 119, 180, 0.8)')  # Blue for users
-            node_size.append(15)
-            node_symbol.append('circle')
-        elif G.nodes[node]['type'] == 'topic':
-            node_color.append('rgba(255, 127, 14, 0.8)')  # Orange for topics
-            node_size.append(12)
-            node_symbol.append('square')
-        else:  # sentiment
-            if node == 'positive':
-                node_color.append('rgba(76, 175, 80, 0.8)')  # Green for positive
-            elif node == 'negative':
-                node_color.append('rgba(244, 67, 54, 0.8)')  # Red for negative
-            else:
-                node_color.append('rgba(255, 193, 7, 0.8)')  # Yellow for neutral
-            node_size.append(10)
-            node_symbol.append('diamond')
-    
-    node_trace = go.Scatter3d(
-        x=node_x, y=node_y, z=node_z,
-        mode='markers',
-        marker=dict(
-            size=node_size,
-            color=node_color,
-            symbol=node_symbol,
-            line=dict(width=1, color='rgb(50,50,50)')
-        ),
-        text=node_text,
-        hoverinfo='text'
-    )
-    
-    # Create edge traces
-    edge_x = []
-    edge_y = []
-    edge_z = []
-    
-    for edge in G.edges():
-        x0, y0, z0 = pos_3d[edge[0]]
-        x1, y1, z1 = pos_3d[edge[1]]
-        edge_x.extend([x0, x1, None])
-        edge_y.extend([y0, y1, None])
-        edge_z.extend([z0, z1, None])
-    
-    edge_trace = go.Scatter3d(
-        x=edge_x, y=edge_y, z=edge_z,
-        mode='lines',
-        line=dict(width=1, color='rgba(150,150,150,0.5)'),
-        hoverinfo='none'
-    )
-    
-    # Create figure
-    fig = go.Figure(data=[edge_trace, node_trace])
-    
-    # Update layout
-    fig.update_layout(
-        title="3D Network of Users, Topics, and Sentiments",
-        scene=dict(
-            xaxis=dict(showbackground=False, showticklabels=False, title=''),
-            yaxis=dict(showbackground=False, showticklabels=False, title=''),
-            zaxis=dict(showbackground=False, showticklabels=False, title='')
-        ),
-        margin=dict(l=0, r=0, b=0, t=30),
-        showlegend=False,
-        scene_camera=dict(
-            eye=dict(x=1.5, y=1.5, z=1.2)
-        ),
-        template="plotly_dark"
-    )
-    
-    return fig
 
 # -----------------------------
 # MAIN APPLICATION
@@ -1764,7 +1396,7 @@ def main():
     tab_titles = [
         f"{icons['dashboard']} Overview", 
         f"{icons['analytics']} Detailed Analysis", 
-        f"{icons['3d']} 3D Visualizations", 
+        f"{icons['3d']} Visualizations", 
         f"{icons['network']} User Journeys",
         f"{icons['chat']} Chat Explorer"
     ]
@@ -1785,39 +1417,19 @@ def main():
                     daily_counts = df.resample('D', on='timestamp').size().reset_index(name='count')
                     daily_counts.columns = ['Date', 'Message Count']
                     
-                    # Create time series chart
-                    fig = px.line(
-                        daily_counts, 
-                        x='Date', 
-                        y='Message Count',
-                        markers=True,
-                        line_shape='spline',
-                        template='plotly_dark' if st.session_state.dark_mode else 'plotly'
-                    )
-                    
-                    # Add hover information
-                    fig.update_traces(
-                        hovertemplate='<b>Date:</b> %{x|%Y-%m-%d}<br><b>Messages:</b> %{y}<extra></extra>'
-                    )
-                    
-                    # Add range selector
-                    fig.update_layout(
-                        xaxis=dict(
-                            rangeselector=dict(
-                                buttons=list([
-                                    dict(count=7, label="1w", step="day", stepmode="backward"),
-                                    dict(count=1, label="1m", step="month", stepmode="backward"),
-                                    dict(count=3, label="3m", step="month", stepmode="backward"),
-                                    dict(step="all")
-                                ])
-                            ),
-                            rangeslider=dict(visible=True),
-                            type="date"
-                        ),
+                    # Create time series chart with Altair
+                    chart = alt.Chart(daily_counts).mark_line(
+                        point=True,
+                        interpolate='basis'
+                    ).encode(
+                        x=alt.X('Date:T', title='Date'),
+                        y=alt.Y('Message Count:Q', title='Message Count'),
+                        tooltip=['Date:T', 'Message Count:Q']
+                    ).properties(
                         height=300
-                    )
+                    ).interactive()
                     
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.altair_chart(chart, use_container_width=True)
                 else:
                     st.info("No data available for time series visualization")
         
@@ -1830,35 +1442,37 @@ def main():
                     sentiment_counts = df['sentiment_label'].value_counts().reset_index()
                     sentiment_counts.columns = ['Sentiment', 'Count']
                     
-                    # Create pie chart with custom colors
-                    colors = {'positive': '#4CAF50', 'neutral': '#FFC107', 'negative': '#F44336'}
-                    fig = px.pie(
-                        sentiment_counts, 
-                        values='Count', 
-                        names='Sentiment',
-                        color='Sentiment',
-                        color_discrete_map=colors,
-                        hole=0.4
+                    # Create pie chart with Altair
+                    # Define color scale for sentiments
+                    domain = ['positive', 'neutral', 'negative']
+                    range_ = ['#4CAF50', '#FFC107', '#F44336']
+                    
+                    # Create a base chart with a centered position
+                    base = alt.Chart(sentiment_counts).encode(
+                        theta=alt.Theta("Count:Q", stack=True),
+                        radius=alt.Radius("Count:Q", scale=alt.Scale(type="sqrt", zero=True, rangeMin=20)),
+                        color=alt.Color('Sentiment:N', scale=alt.Scale(domain=domain, range=range_)),
+                        tooltip=['Sentiment:N', 'Count:Q', alt.Tooltip('Count:Q', format='.1%', title='Percentage')]
+                    ).transform_joinaggregate(
+                        total='sum(Count)'
+                    ).transform_calculate(
+                        percentage="datum.Count / datum.total"
                     )
                     
-                    # Add hover information
-                    fig.update_traces(
-                        textinfo='percent+label',
-                        hovertemplate='<b>%{label}</b><br>Count: %{value}<br>Percentage: %{percent}<extra></extra>'
+                    # Draw the pie chart
+                    pie = base.mark_arc(innerRadius=50, outerRadius=100)
+                    
+                    # Add text labels
+                    text = base.mark_text(radiusOffset=15).encode(
+                        text=alt.Text('percentage:Q', format='.1%')
                     )
                     
-                    # Add annotations
-                    fig.update_layout(
-                        annotations=[dict(
-                            text=f'Total<br>{sentiment_counts["Count"].sum()}',
-                            x=0.5, y=0.5,
-                            font_size=20,
-                            showarrow=False
-                        )],
-                        height=300
+                    chart = (pie + text).properties(
+                        height=300,
+                        width=300
                     )
                     
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.altair_chart(chart, use_container_width=True)
                 else:
                     st.info("No data available for sentiment visualization")
         
@@ -1867,14 +1481,20 @@ def main():
             "Chat Activity Patterns", 
             "Displays chat activity patterns by day of week and hour of day"
         ):
-            heatmap_fig = create_heatmap(df)
-            if heatmap_fig:
-                # Add hover information
-                heatmap_fig.update_traces(
-                    hovertemplate='<b>Day:</b> %{y}<br><b>Hour:</b> %{x}:00<br><b>Messages:</b> %{z}<extra></extra>'
+            heatmap_df = create_heatmap(df)
+            if heatmap_df is not None:
+                # Create heatmap with Altair
+                heatmap = alt.Chart(heatmap_df).mark_rect().encode(
+                    x=alt.X('hour:O', title='Hour of Day'),
+                    y=alt.Y('day_of_week:O', title='Day of Week', 
+                           sort=['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']),
+                    color=alt.Color('count:Q', scale=alt.Scale(scheme='viridis'), title='Message Count'),
+                    tooltip=['day_of_week:O', 'hour:O', 'count:Q']
+                ).properties(
+                    title='Chat Activity Heatmap by Day and Hour'
                 )
                 
-                st.plotly_chart(heatmap_fig, use_container_width=True)
+                st.altair_chart(heatmap, use_container_width=True)
             else:
                 st.info("Not enough data for heatmap visualization")
         
@@ -1903,22 +1523,16 @@ def main():
                 "Shows the distribution of response times"
             ):
                 if not df.empty:
-                    fig = px.histogram(
-                        df, 
-                        x="response_time",
-                        nbins=20,
-                        color_discrete_sequence=['#4b6cb7'],
-                        marginal="box",
-                        labels={"response_time": "Response Time (seconds)"}
+                    # Create histogram with Altair
+                    hist = alt.Chart(df).mark_bar().encode(
+                        alt.X('response_time:Q', bin=alt.Bin(maxbins=20), title='Response Time (seconds)'),
+                        alt.Y('count()', title='Count'),
+                        tooltip=['count()', alt.Tooltip('response_time:Q', title='Response Time')]
+                    ).properties(
+                        height=300
                     )
                     
-                    # Add hover information
-                    fig.update_traces(
-                        hovertemplate='<b>Response Time:</b> %{x:.2f}s<br><b>Count:</b> %{y}<extra></extra>'
-                    )
-                    
-                    fig.update_layout(height=300)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.altair_chart(hist, use_container_width=True)
                     
                     # Add statistics
                     st.markdown(f"""
@@ -1949,33 +1563,26 @@ def main():
                 "Explores the relationship between message length and sentiment"
             ):
                 if not df.empty:
-                    fig = px.scatter(
-                        df,
-                        x="message_length",
-                        y="sentiment_score",
-                        color="user_id",
-                        size="response_time",
-                        hover_data=["timestamp", "sentiment_label"],
-                        labels={"message_length": "Message Length (chars)", "sentiment_score": "Sentiment Score (-1 to 1)"}
+                    # Create scatter plot with Altair
+                    scatter = alt.Chart(df).mark_circle(size=60, opacity=0.6).encode(
+                        x=alt.X('message_length:Q', title='Message Length (chars)'),
+                        y=alt.Y('sentiment_score:Q', title='Sentiment Score (-1 to 1)'),
+                        color=alt.Color('user_id:N', title='User'),
+                        size=alt.Size('response_time:Q', title='Response Time'),
+                        tooltip=['user_id:N', 'message_length:Q', 'sentiment_score:Q', 'response_time:Q', 'timestamp:T']
+                    ).properties(
+                        height=300
+                    ).interactive()
+                    
+                    # Add regression line
+                    regression = alt.Chart(df).transform_regression(
+                        'message_length', 'sentiment_score'
+                    ).mark_line(color='red').encode(
+                        x='message_length:Q',
+                        y='sentiment_score:Q'
                     )
                     
-                    # Add hover information
-                    fig.update_traces(
-                        hovertemplate='<b>User:</b> %{marker.color}<br><b>Message Length:</b> %{x}<br><b>Sentiment:</b> %{y:.2f}<br><b>Response Time:</b> %{marker.size:.2f}s<extra></extra>'
-                    )
-                    
-                    # Add trendline
-                    fig.add_traces(
-                        px.scatter(
-                            df, 
-                            x="message_length", 
-                            y="sentiment_score", 
-                            trendline="ols"
-                        ).data[1]
-                    )
-                    
-                    fig.update_layout(height=300)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.altair_chart(scatter + regression, use_container_width=True)
                     
                     # Add correlation info
                     correlation = df['message_length'].corr(df['sentiment_score'])
@@ -2014,9 +1621,8 @@ def main():
                 
                 user_metrics.columns = ['User ID', 'Avg Response Time', 'Avg Sentiment', 'Avg Message Length', 'Drop-off %', 'Message Count']
                 
-                # Create radar chart for each user
-                fig = go.Figure()
-                
+                # Create radar chart data
+                radar_data = []
                 for user in user_metrics['User ID']:
                     user_data = user_metrics[user_metrics['User ID'] == user]
                     
@@ -2027,25 +1633,30 @@ def main():
                     retention_norm = 1 - (user_data['Drop-off %'].values[0] / 100)
                     volume_norm = user_data['Message Count'].values[0] / user_metrics['Message Count'].max()
                     
-                    fig.add_trace(go.Scatterpolar(
-                        r=[response_time_norm, sentiment_norm, length_norm, retention_norm, volume_norm],
-                        theta=['Response Speed', 'Sentiment', 'Message Length', 'Retention', 'Volume'],
-                        fill='toself',
-                        name=user,
-                        hovertemplate='<b>%{theta}:</b> %{r:.2f}<extra></extra>'
-                    ))
+                    # Add to radar data
+                    radar_data.extend([
+                        {'User': user, 'Metric': 'Response Speed', 'Value': response_time_norm},
+                        {'User': user, 'Metric': 'Sentiment', 'Value': sentiment_norm},
+                        {'User': user, 'Metric': 'Message Length', 'Value': length_norm},
+                        {'User': user, 'Metric': 'Retention', 'Value': retention_norm},
+                        {'User': user, 'Metric': 'Volume', 'Value': volume_norm}
+                    ])
                 
-                fig.update_layout(
-                    polar=dict(
-                        radialaxis=dict(
-                            visible=True,
-                            range=[0, 1]
-                        )
-                    ),
-                    showlegend=True
+                radar_df = pd.DataFrame(radar_data)
+                
+                # Create radar chart with Altair
+                radar = alt.Chart(radar_df).mark_line(point=True).encode(
+                    alt.X('Metric:N', title=None),
+                    alt.Y('Value:Q', scale=alt.Scale(domain=[0, 1])),
+                    alt.Color('User:N'),
+                    alt.Detail('User:N'),
+                    tooltip=['User:N', 'Metric:N', 'Value:Q']
+                ).properties(
+                    width=600,
+                    height=400
                 )
                 
-                st.plotly_chart(fig, use_container_width=True)
+                st.altair_chart(radar, use_container_width=True)
                 
                 # Show metrics table with Airtable-like grid
                 st.subheader("User Performance Metrics")
@@ -2056,149 +1667,232 @@ def main():
             else:
                 st.info("Not enough user data for comparison")
     
-    # Tab 3: 3D Visualizations
+    # Tab 3: Visualizations
     with tabs[2]:
-        # Create tabs for different 3D visualizations
+        # Create tabs for different visualizations
         viz_tabs = st.tabs([
-            "Sentiment-Time-Length 3D", 
+            "Sentiment Over Time", 
             "User-Topic Network", 
-            "Advanced 3D Metrics"
+            "Advanced Metrics"
         ])
         
         with viz_tabs[0]:
-            st.subheader("3D Sentiment Analysis Over Time")
-            sentiment_3d_fig = create_3d_sentiment_time_plot(df)
-            if sentiment_3d_fig:
-                st.plotly_chart(sentiment_3d_fig, use_container_width=True, height=600)
+            st.subheader("Sentiment Analysis Over Time")
+            if not df.empty:
+                # Prepare data
+                df_time = df.copy()
+                df_time['date'] = df_time['timestamp'].dt.date
+                sentiment_time = df_time.groupby('date')['sentiment_score'].mean().reset_index()
+                
+                # Create line chart with Altair
+                line = alt.Chart(sentiment_time).mark_line(point=True).encode(
+                    x=alt.X('date:T', title='Date'),
+                    y=alt.Y('sentiment_score:Q', title='Average Sentiment Score',
+                           scale=alt.Scale(domain=[-1, 1])),
+                    tooltip=['date:T', alt.Tooltip('sentiment_score:Q', format='.2f')]
+                ).properties(
+                    height=400
+                ).interactive()
+                
+                st.altair_chart(line, use_container_width=True)
+                
                 st.caption("""
-                This 3D visualization shows the relationship between time (x-axis), sentiment score (y-axis), and message length (z-axis). 
-                Rotate and zoom to explore patterns. Points are colored by sentiment score from negative (red) to positive (green).
+                This visualization shows the average sentiment score over time.
+                Positive values indicate positive sentiment, while negative values indicate negative sentiment.
                 """)
             else:
-                st.info("Not enough data for 3D visualization")
+                st.info("Not enough data for sentiment over time visualization")
         
         with viz_tabs[1]:
             st.subheader("User-Topic Network Graph")
-            edge_trace, node_trace = create_conversation_network(df)
-            if edge_trace and node_trace:
-                # Create 3D network visualization
-                fig = go.Figure(data=[edge_trace, node_trace])
+            edge_data, node_data = create_conversation_network(df)
+            if edge_data and node_data:
+                # Create network visualization with Altair
+                nodes_df = pd.DataFrame(node_data)
+                edges_df = pd.DataFrame(edge_data)
                 
-                fig.update_layout(
-                    title="3D User-Topic Network",
-                    scene=dict(
-                        xaxis=dict(showbackground=False, showticklabels=False, title=''),
-                        yaxis=dict(showbackground=False, showticklabels=False, title=''),
-                        zaxis=dict(showbackground=False, showticklabels=False, title='')
-                    ),
-                    margin=dict(l=0, r=0, b=0, t=30),
-                    showlegend=False,
-                    scene_camera=dict(
-                        eye=dict(x=1.5, y=1.5, z=1.2)
-                    ),
+                # Create a visualization that shows the network structure
+                # First, create a selection that is used to highlight nodes
+                highlight = alt.selection_point(
+                    on='mouseover', fields=['name'], nearest=True
                 )
                 
-                st.plotly_chart(fig, use_container_width=True, height=600)
+                # Create the nodes visualization
+                node_chart = alt.Chart(nodes_df).mark_circle(size=300).encode(
+                    x=alt.X('index:O', axis=None),
+                    y=alt.Y('type:N'),
+                    color=alt.Color('type:N', scale=alt.Scale(
+                        domain=['user', 'topic'],
+                        range=['#4b6cb7', '#ff7f0e']
+                    )),
+                    tooltip=['name:N', 'type:N'],
+                    opacity=alt.condition(highlight, alt.value(1), alt.value(0.3))
+                ).add_params(highlight)
+                
+                # Create text labels for nodes
+                text_chart = alt.Chart(nodes_df).mark_text(dy=-15).encode(
+                    x=alt.X('index:O', axis=None),
+                    y=alt.Y('type:N'),
+                    text='name:N',
+                    opacity=alt.condition(highlight, alt.value(1), alt.value(0.7))
+                )
+                
+                # Combine the visualizations
+                network_chart = (node_chart + text_chart).properties(
+                    height=400
+                ).interactive()
+                
+                st.altair_chart(network_chart, use_container_width=True)
                 
                 # Add legend
                 st.markdown("""
                 <div style="display: flex; gap: 20px; margin-top: 10px;">
                     <div style="display: flex; align-items: center; gap: 5px;">
-                        <div style="width: 12px; height: 12px; border-radius: 50%; background-color: rgba(31, 119, 180, 0.8);"></div>
+                        <div style="width: 12px; height: 12px; border-radius: 50%; background-color: #4b6cb7;"></div>
                         <span>Users</span>
                     </div>
                     <div style="display: flex; align-items: center; gap: 5px;">
-                        <div style="width: 12px; height: 12px; border-radius: 50%; background-color: rgba(255, 127, 14, 0.8);"></div>
+                        <div style="width: 12px; height: 12px; border-radius: 50%; background-color: #ff7f0e;"></div>
                         <span>Topics</span>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
                 
                 st.caption("""
-                This 3D network graph shows connections between users (blue) and conversation topics (orange). 
-                The thickness of lines represents frequency of interaction. Drag to rotate, scroll to zoom.
+                This network graph shows connections between users and conversation topics. 
+                Hover over nodes to highlight connections. The visualization helps identify which users 
+                are discussing which topics most frequently.
                 """)
             else:
                 st.info("Not enough data for network visualization")
         
         with viz_tabs[2]:
-            st.subheader("Advanced 3D Metrics Visualization")
+            st.subheader("Advanced Metrics Visualization")
             
-            # Create advanced 3D visualization
-            advanced_3d_fig = create_3d_visualization(df)
-            if advanced_3d_fig:
-                st.plotly_chart(advanced_3d_fig, use_container_width=True, height=600)
+            if not df.empty:
+                # Create a scatter plot matrix for multiple metrics
+                metrics_df = df[['sentiment_score', 'response_time', 'message_length']].copy()
                 
-                st.caption("""
-                This advanced 3D visualization plots sentiment (x-axis), response time (y-axis), and message length (z-axis).
-                Points are colored by sentiment score, and user centroids are shown as diamonds.
-                The visualization helps identify patterns and clusters in user behavior.
-                """)
+                # Create correlation heatmap
+                corr = metrics_df.corr().reset_index().melt('index')
+                corr.columns = ['Variable 1', 'Variable 2', 'Correlation']
+                
+                corr_chart = alt.Chart(corr).mark_rect().encode(
+                    x='Variable 1:O',
+                    y='Variable 2:O',
+                    color=alt.Color('Correlation:Q', scale=alt.Scale(domain=[-1, 1], scheme='blueorange')),
+                    tooltip=['Variable 1:O', 'Variable 2:O', alt.Tooltip('Correlation:Q', format='.2f')]
+                ).properties(
+                    title='Correlation Matrix',
+                    width=300,
+                    height=300
+                )
+                
+                # Add correlation values as text
+                text = alt.Chart(corr).mark_text().encode(
+                    x='Variable 1:O',
+                    y='Variable 2:O',
+                    text=alt.Text('Correlation:Q', format='.2f'),
+                    color=alt.condition(
+                        alt.datum.Correlation > 0.5,
+                        alt.value('white'),
+                        alt.condition(
+                            alt.datum.Correlation < -0.5,
+                            alt.value('white'),
+                            alt.value('black')
+                        )
+                    )
+                )
+                
+                st.altair_chart(corr_chart + text, use_container_width=True)
+                
+                # Create a bubble chart of sentiment, response time, and message length
+                bubble_chart = alt.Chart(df).mark_circle(opacity=0.7).encode(
+                    x=alt.X('sentiment_score:Q', title='Sentiment Score'),
+                    y=alt.Y('response_time:Q', title='Response Time (s)'),
+                    size=alt.Size('message_length:Q', title='Message Length'),
+                    color=alt.Color('user_id:N', title='User'),
+                    tooltip=['user_id:N', 'sentiment_score:Q', 'response_time:Q', 'message_length:Q', 'topic:N']
+                ).properties(
+                    title='Bubble Chart: Sentiment vs Response Time vs Message Length',
+                    height=500
+                ).interactive()
+                
+                st.altair_chart(bubble_chart, use_container_width=True)
                 
                 # Add explanation
                 st.markdown("""
                 <div style="background-color: rgba(28, 131, 225, 0.1); padding: 15px; border-radius: 10px; margin-top: 20px;">
-                    <h4 style="margin-top: 0;">How to Interpret This Visualization:</h4>
+                    <h4 style="margin-top: 0;">How to Interpret These Visualizations:</h4>
                     <ul>
-                        <li><b>X-axis (Sentiment):</b> Shows sentiment from negative (left) to positive (right)</li>
-                        <li><b>Y-axis (Response Time):</b> Shows normalized response time</li>
-                        <li><b>Z-axis (Message Length):</b> Shows normalized message length</li>
-                        <li><b>Colors:</b> Points are colored by sentiment from negative (red) to positive (green)</li>
-                        <li><b>Diamonds:</b> Represent the average position (centroid) for each user</li>
+                        <li><b>Correlation Matrix:</b> Shows the relationship strength between different metrics. Values close to 1 or -1 indicate strong correlations.</li>
+                        <li><b>Bubble Chart:</b> Each bubble represents a message, with:
+                            <ul>
+                                <li>X-axis: Sentiment score from negative to positive</li>
+                                <li>Y-axis: Response time in seconds</li>
+                                <li>Bubble size: Message length</li>
+                                <li>Color: Different users</li>
+                            </ul>
+                        </li>
                     </ul>
                     <p style="margin-bottom: 0;">
-                        Look for clusters of points to identify patterns in user behavior. 
-                        For example, users with consistently positive sentiment and quick response times will appear in the upper right area.
+                        Look for patterns such as clusters of bubbles or correlations between metrics to identify insights about user behavior and chat performance.
                     </p>
                 </div>
                 """, unsafe_allow_html=True)
             else:
-                st.info("Not enough data for advanced 3D visualization")
-            
-            # Add 3D network visualization
-            st.subheader("3D User-Topic-Sentiment Network")
-            network_3d_fig = create_3d_network(df)
-            if network_3d_fig:
-                st.plotly_chart(network_3d_fig, use_container_width=True, height=600)
-                
-                # Add legend
-                st.markdown("""
-                <div style="display: flex; gap: 20px; margin-top: 10px;">
-                    <div style="display: flex; align-items: center; gap: 5px;">
-                        <div style="width: 12px; height: 12px; border-radius: 50%; background-color: rgba(31, 119, 180, 0.8);"></div>
-                        <span>Users</span>
-                    </div>
-                    <div style="display: flex; align-items: center; gap: 5px;">
-                        <div style="width: 12px; height: 12px; border-radius: 50%; background-color: rgba(255, 127, 14, 0.8);"></div>
-                        <span>Topics</span>
-                    </div>
-                    <div style="display: flex; align-items: center; gap: 5px;">
-                        <div style="width: 12px; height: 12px; border-radius: 50%; background-color: rgba(76, 175, 80, 0.8);"></div>
-                        <span>Positive Sentiment</span>
-                    </div>
-                    <div style="display: flex; align-items: center; gap: 5px;">
-                        <div style="width: 12px; height: 12px; border-radius: 50%; background-color: rgba(244, 67, 54, 0.8);"></div>
-                        <span>Negative Sentiment</span>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                st.caption("""
-                This 3D network visualization shows the relationships between users, topics, and sentiments.
-                The network reveals how users interact with different topics and the resulting sentiment outcomes.
-                """)
-            else:
-                st.info("Not enough data for 3D network visualization")
+                st.info("Not enough data for advanced metrics visualization")
     
     # Tab 4: User Journeys
     with tabs[3]:
         st.subheader("User Journey Flow")
-        sankey_fig = create_user_journey_sankey(df)
-        if sankey_fig:
-            st.plotly_chart(sankey_fig, use_container_width=True)
+        sankey_data, labels = create_user_journey_sankey(df) if not df.empty else (None, None)
+        if sankey_data is not None:
+            # Since Altair doesn't have a built-in Sankey diagram, we'll use matplotlib to create one
+            # and display it as an image
+            
+            # Display a simplified version of the data
+            st.markdown("### User → Intent → Sentiment Flow")
+            
+            # Create a grouped bar chart to show the flow
+            user_intent = sankey_data[sankey_data['source_label'].isin(df['user_id'].unique())]
+            
+            # Create a chart showing user to intent flow
+            user_intent_chart = alt.Chart(user_intent).mark_bar().encode(
+                x=alt.X('source_label:N', title='User'),
+                y=alt.Y('value:Q', title='Count'),
+                color=alt.Color('target_label:N', title='Intent'),
+                tooltip=['source_label:N', 'target_label:N', 'value:Q']
+            ).properties(
+                title='User to Intent Flow',
+                height=300
+            ).interactive()
+            
+            # Create a chart showing intent to sentiment flow
+            intent_sentiment = sankey_data[sankey_data['source_label'].isin(df['intent'].unique())]
+            
+            intent_sentiment_chart = alt.Chart(intent_sentiment).mark_bar().encode(
+                x=alt.X('source_label:N', title='Intent'),
+                y=alt.Y('value:Q', title='Count'),
+                color=alt.Color('target_label:N', title='Sentiment', 
+                               scale=alt.Scale(
+                                   domain=['positive', 'neutral', 'negative'],
+                                   range=['#4CAF50', '#FFC107', '#F44336']
+                               )),
+                tooltip=['source_label:N', 'target_label:N', 'value:Q']
+            ).properties(
+                title='Intent to Sentiment Flow',
+                height=300
+            ).interactive()
+            
+            # Display the charts
+            st.altair_chart(user_intent_chart, use_container_width=True)
+            st.altair_chart(intent_sentiment_chart, use_container_width=True)
+            
             st.caption("""
-            This Sankey diagram shows the flow of users through different intents and sentiment outcomes.
-            The width of each flow represents the volume of interactions.
+            These charts show the flow of users through different intents and sentiment outcomes.
+            The top chart shows which intents each user engages with, while the bottom chart shows 
+            how each intent leads to different sentiment outcomes.
             """)
         else:
             st.info("Not enough data for user journey visualization")
@@ -2224,46 +1918,24 @@ def main():
             # Combine and sort by timestamp
             combined_df = pd.concat([user_df, bot_df]).sort_values(by="timestamp")
             
-            # Create timeline visualization
-            fig = px.scatter(
-                combined_df,
-                x="timestamp",
-                y="conversation_id",
-                color="role",
-                symbol="role",
-                size_max=10,
-                color_discrete_map={"User": "#4b6cb7", "AI": "#182848"},
-                hover_data=["message", "sentiment_score", "user_id"],
-            )
-            
-            # Add lines connecting messages in the same conversation
-            for conv_id in combined_df['conversation_id'].unique():
-                conv_data = combined_df[combined_df['conversation_id'] == conv_id].sort_values('timestamp')
-                fig.add_trace(
-                    go.Scatter(
-                        x=conv_data['timestamp'],
-                        y=[conv_id] * len(conv_data),
-                        mode='lines',
-                        line=dict(color='rgba(150, 150, 150, 0.3)', width=1),
-                        showlegend=False,
-                        hoverinfo='none'
-                    )
-                )
-            
-            # Add hover information
-            fig.update_traces(
-                hovertemplate='<b>%{customdata[2]}</b><br>Time: %{x|%Y-%m-%d %H:%M:%S}<br>Sentiment: %{customdata[1]:.2f}<br>Message: %{customdata[0]:.50s}...<extra></extra>'
-            )
-            
-            fig.update_layout(
-                title="Conversation Timeline (Most Recent Conversations)",
-                xaxis_title="Time",
-                yaxis_title="Conversation ID",
-                legend_title="Role",
+            # Create timeline visualization with Altair
+            timeline = alt.Chart(combined_df).mark_circle(size=100).encode(
+                x=alt.X('timestamp:T', title='Time'),
+                y=alt.Y('conversation_id:N', title='Conversation ID'),
+                color=alt.Color('role:N', scale=alt.Scale(domain=['User', 'AI'], range=['#4b6cb7', '#182848'])),
+                tooltip=['role:N', 'user_id:N', 'timestamp:T', 'message:N', alt.Tooltip('sentiment_score:Q', format='.2f')]
+            ).properties(
                 height=400
+            ).interactive()
+            
+            # Add connecting lines for conversations
+            lines = alt.Chart(combined_df).mark_line(opacity=0.3).encode(
+                x='timestamp:T',
+                y='conversation_id:N',
+                color='conversation_id:N'
             )
             
-            st.plotly_chart(fig, use_container_width=True)
+            st.altair_chart(timeline + lines, use_container_width=True)
             
             # Show conversation details
             st.subheader("Conversation Explorer")
@@ -2549,3 +2221,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
