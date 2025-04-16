@@ -403,9 +403,9 @@ def load_lottie_animation(url):
 # CONFIGURATION & AUTO-REFRESH
 # -----------------------------
 # Configure Supabase credentials
-SUPABASE_URL = "https://svjindgyokubrdxesdlp.supabase.co"
+SUPABASE_URL = "your_supabase_url"
 SUPABASE_KEY = (
-"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN2amluZGd5b2t1YnJkeGVzZGxwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzk1OTM2MTQsImV4cCI6MjA1NTE2OTYxNH0.P_giMWMPtnBT4Ca7AsHCcuNtoV0OWgsY6VHTqDqh0Sw"
+"your_supabase_anon_key"
 )
 
 # -----------------------------
